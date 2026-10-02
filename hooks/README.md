@@ -29,11 +29,13 @@ hooks surface before installing or loading it:
 
 ```sh
 export CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1
-export TYPESAFE_API_KEY="<your TypeSafe key>"
 
-claude plugin marketplace add tamaratran/fast-jev-compaction
+claude plugin marketplace add raphant/fast-jev-compaction
 claude plugin install fast-jev-compaction@fast-jev-compaction
 ```
+
+Then give the hook a way to find the TypeSafe key; see
+[Configuration](#configuration).
 
 For local development:
 
@@ -48,6 +50,8 @@ The plugin declares these `userConfig` values in
 
 | Option | Default |
 | --- | ---: |
+| `apiKey` | unset |
+| `apiKeyCommand` | unset |
 | `keepThreshold` | `0.5` |
 | `preserveRecentMessages` | `6` |
 | `compactAtPercent` | `60` |

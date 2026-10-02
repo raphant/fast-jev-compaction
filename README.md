@@ -172,7 +172,7 @@ npm run typecheck        # library + hook
 npm test
 npm run build
 npm run validate:plugin  # claude plugin validate
-infisical run --env=dev --path=/claude-hooks -- npm run demo
+infisical run --env=dev --path=/claude-hooks -- npm run demo  # any way to set TYPESAFE_API_KEY
 ```
 
 The unit tests use a fake Jev and never contact TypeSafe. The demo is the live
