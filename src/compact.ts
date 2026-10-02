@@ -243,6 +243,23 @@ export function reductionRatio(result: Pick<CompactResult, 'stats'>): number {
   return charsBefore === 0 ? 0 : (charsBefore - charsAfter) / charsBefore;
 }
 
+/**
+ * The reduction `compact` reaches when every unpinned call is dropped. No Jev
+ * answer removes more, so a caller can tell without a request whether a
+ * minimum reduction is in reach.
+ */
+export function maxReduction(messages: readonly Message[], options: CompactOptions = {}): number {
+  const resolved = resolveOptions(options);
+  const calls = collectToolCalls(messages, resolved.preserveRecentMessages);
+  const decisions = calls.map((call) =>
+    decideCall(call, { keepCall: 0, keepResult: 0 }, resolved),
+  );
+  const kept = applyDecisions(messages, decisions, calls, resolved.truncateHeadChars);
+  const before = messages.reduce((sum, message) => sum + messageChars(message), 0);
+  const after = kept.reduce((sum, message) => sum + messageChars(message), 0);
+  return before === 0 ? 0 : (before - after) / before;
+}
+
 function count(decisions: readonly CallDecision[], reason: CallDecision['reason']): number {
   return decisions.filter((decision) => decision.reason === reason).length;
 }

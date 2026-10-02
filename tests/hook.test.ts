@@ -4,6 +4,7 @@ import {
   decisionLog,
   decisionLogLines,
   getApiKey,
+  register,
   resolveHookConfig,
   summarize,
   toSessionMessages,
@@ -146,6 +147,70 @@ describe('compactSession', () => {
     await expect(
       compactSession(transcript(), { ...config, apiKey: 'k' }, async () => ({ status: 500, ok: false, text: 'x' })),
     ).rejects.toThrow(/500/);
+  });
+});
+
+describe('session.compact hook', () => {
+  type Compact = (
+    $: unknown,
+    event: { trigger: string; messages: SessionMessage[] },
+    next: () => Promise<unknown>,
+  ) => Promise<unknown>;
+
+  function compactHook(options: Record<string, unknown>): Compact {
+    let hook: Compact | undefined;
+    const on = (name: string, ...rest: unknown[]) => {
+      if (name === 'session.compact') hook = rest[rest.length - 1] as Compact;
+    };
+    register(on as never, options as never);
+    return hook!;
+  }
+
+  function host(fetch: ReturnType<typeof jevFetch>, toasts: string[]) {
+    return {
+      env: { get: async () => undefined },
+      settings: { read: async () => ({}) },
+      http: { fetch },
+      ui: { log: () => {}, toast: (text: string) => toasts.push(text) },
+    };
+  }
+
+  const next = async () => ({ skip: 'built-in' });
+
+  it('skips a precompute without asking Jev', async () => {
+    const bodies: string[] = [];
+    const out = await compactHook({ apiKey: 'k', preserveRecentMessages: 1 })(
+      host(jevFetch(() => 0.1, bodies), []),
+      { trigger: 'precompute', messages: transcript() },
+      next,
+    );
+    expect(out).toEqual({ skip: expect.stringMatching(/precompute/) });
+    expect(bodies).toHaveLength(0);
+  });
+
+  it('hands a precompute to the built-in summary when no drop reaches the minimum', async () => {
+    const bodies: string[] = [];
+    const out = await compactHook({ apiKey: 'k' })(
+      host(jevFetch(() => 0.1, bodies), []),
+      { trigger: 'precompute', messages: transcript() },
+      next,
+    );
+    expect(out).toEqual({ skip: 'built-in' });
+    expect(bodies).toHaveLength(0);
+  });
+
+  it('names the trigger in the toast', async () => {
+    const toasts: string[] = [];
+    await compactHook({ apiKey: 'k', preserveRecentMessages: 1 })(
+      host(jevFetch(() => 0.1), toasts),
+      { trigger: 'auto', messages: transcript() },
+      next,
+    );
+    await compactHook({})(host(jevFetch(() => 0.1), toasts), { trigger: 'manual', messages: transcript() }, next);
+    expect(toasts).toEqual([
+      expect.stringMatching(/^kept 3\/7 messages \(auto\), no summary \(/),
+      'fallback to built-in summary (manual; TYPESAFE_API_KEY is not configured)',
+    ]);
   });
 });
 

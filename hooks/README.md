@@ -14,6 +14,13 @@ item is kept when Jev's probability reaches `keepThreshold`; a dropped result
 is truncated to its first `truncateHeadChars` characters plus a one-line note,
 and a dropped call disappears with its result.
 
+Jev is not asked on a `precompute`, the run the engine starts before the
+threshold: the engine discards a pruned history once the conversation grows,
+and Jev answers in under a second when the compaction itself runs. The hook
+skips the precompute, except when dropping every unpinned call would still
+remove less than `minReductionRatio`. Then the compaction will fall back, so
+the hook passes the precompute on and the built-in summary starts early.
+
 The state is fitted into `maxStateTokens` in stages: tool inputs are
 truncated, then long texts are abridged (oldest first, pinned messages last),
 then old messages collapse to a `[… N chars omitted …]` note, then old tool

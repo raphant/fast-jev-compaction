@@ -156,9 +156,10 @@ the key, so the key is never in a file or in the environment; see
 [`hooks/README.md`](hooks/README.md#configuration).
 Restart Claude Code or run `/reload-plugins`. From then on `/compact` (and
 auto-compaction) goes through Jev: the toast reads
-`fast-jev-compaction: kept N/M messages, no summary (…)` when the pruned history
-replaced the built-in summary, or `fallback to built-in summary (…)` when Jev
-could not remove enough (short sessions, or when it fails).
+`fast-jev-compaction: kept N/M messages (auto), no summary (…)` when the pruned
+history replaced the built-in summary, or `fallback to built-in summary (auto; …)`
+when Jev could not remove enough (short sessions, or when it fails). The word in
+parentheses is the trigger: `auto`, `manual` or `plugin`.
 
 To run from a checkout without installing: `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude --plugin-dir .`
 from the repository root. No publishing step is required; the marketplace is

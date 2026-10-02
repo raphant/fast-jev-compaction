@@ -8,7 +8,7 @@ import type {
   TurnCompleteInput,
 } from 'claude-code';
 
-import { compact, reductionRatio, resolveOptions } from '../src/compact.js';
+import { compact, maxReduction, reductionRatio, resolveOptions } from '../src/compact.js';
 import { buildJevRequest, DEFAULT_MODEL, parseJevResponse } from '../src/request.js';
 import type {
   CompactOptions,
@@ -289,6 +289,15 @@ export const register: Register = (on: On, options: PluginOptions) => {
   let apiKey: string | undefined;
 
   on('session.compact', async ($, event, next) => {
+    // The engine discards our precompute when the conversation grows before the
+    // threshold, but it keeps a built-in summary built ahead of time. So pass a
+    // precompute on only when no Jev answer could reach the minimum, that is,
+    // when the compaction to come will fall back to the built-in summary.
+    if (event.trigger === 'precompute') {
+      return maxReduction(event.messages, configured) < configured.minReductionRatio
+        ? next(event)
+        : { skip: 'fast-jev-compaction skips precompute' };
+    }
     try {
       apiKey ??= await getApiKey($, configured);
       const config = { ...configured, apiKey };
@@ -300,19 +309,19 @@ export const register: Register = (on: On, options: PluginOptions) => {
       if (reductionRatio(result) < config.minReductionRatio) {
         notify(
           $,
-          `fallback to built-in summary (below ${percent(config.minReductionRatio)} minimum: ${summarize(result)})`,
+          `fallback to built-in summary (${event.trigger}; below ${percent(config.minReductionRatio)} minimum: ${summarize(result)})`,
         );
         return next(event);
       }
       notify(
         $,
-        `kept ${messages.length}/${event.messages.length} messages, no summary (${summarize(result)})`,
+        `kept ${messages.length}/${event.messages.length} messages (${event.trigger}), no summary (${summarize(result)})`,
       );
       return { messages };
     } catch (error) {
       notify(
         $,
-        `fallback to built-in summary (${error instanceof Error ? error.message : String(error)})`,
+        `fallback to built-in summary (${event.trigger}; ${error instanceof Error ? error.message : String(error)})`,
       );
       return next(event);
     }
