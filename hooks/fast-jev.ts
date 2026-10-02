@@ -42,6 +42,7 @@ export type HookFetch = (url: string, init?: HookFetchInit) => Promise<HookFetch
 
 export type HookConfig = CompactOptions & {
   apiKey?: string;
+  apiKeyCommand?: string;
   compactAtPercent: number;
   minReductionRatio: number;
   model: string;
@@ -82,6 +83,8 @@ export function resolveHookConfig(options: PluginOptions): HookConfig {
   };
   const apiKey = optionString(options, 'apiKey');
   if (apiKey) config.apiKey = apiKey;
+  const apiKeyCommand = optionString(options, 'apiKeyCommand');
+  if (apiKeyCommand) config.apiKeyCommand = apiKeyCommand;
   const goal = optionString(options, 'goal');
   if (goal) config.goal = goal;
   return config;
@@ -225,24 +228,9 @@ export function decisionLogLines(
 }
 
 /**
- * Asks the Infisical CLI for the key, run from $HOME so ~/.infisical.json picks
- * the project. The key sits in `/claude-hooks`, a folder `infisical export`
- * (root only) never reads, so it stays out of every process environment.
- */
-export const INFISICAL_ARGV = [
-  'infisical',
-  'secrets',
-  'get',
-  'TYPESAFE_API_KEY',
-  '--env=dev',
-  '--path=/claude-hooks',
-  '--plain',
-  '--silent',
-] as const;
-
-/**
  * Finds the TypeSafe key: the `apiKey` option, then `TYPESAFE_API_KEY` in the
- * environment, then in settings.json `env`, then Infisical. Undefined when none has it.
+ * environment, then in settings.json `env`, then the stdout of the
+ * `apiKeyCommand` option, run by `/bin/sh -c` from $HOME. Undefined when none has it.
  */
 export async function getApiKey(
   $: {
@@ -266,13 +254,17 @@ export async function getApiKey(
     const value = (env as Record<string, unknown>)['TYPESAFE_API_KEY'];
     if (typeof value === 'string' && value) return value;
   }
+  if (!config.apiKeyCommand) return undefined;
   try {
     const home = await $.env.get('HOME');
-    const { exitCode, stdout } = await $.process.run(INFISICAL_ARGV, home ? { cwd: home } : {});
+    const { exitCode, stdout } = await $.process.run(
+      ['/bin/sh', '-c', config.apiKeyCommand],
+      home ? { cwd: home } : {},
+    );
     const value = stdout.trim();
     if (exitCode === 0 && value) return value;
   } catch {
-    // infisical missing or timed out: report the key as not configured
+    // command could not start or timed out: report the key as not configured
   }
   return undefined;
 }

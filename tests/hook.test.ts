@@ -4,7 +4,6 @@ import {
   decisionLog,
   decisionLogLines,
   getApiKey,
-  INFISICAL_ARGV,
   resolveHookConfig,
   summarize,
   toSessionMessages,
@@ -151,6 +150,8 @@ describe('compactSession', () => {
 });
 
 describe('getApiKey', () => {
+  const command = 'infisical secrets get TYPESAFE_API_KEY --plain';
+
   function host(run: (argv: readonly string[], init?: { cwd?: string }) => Promise<{ exitCode: number | null; stdout: string }>) {
     return {
       env: { get: async (name: string) => (name === 'HOME' ? '/home/me' : undefined) },
@@ -159,30 +160,33 @@ describe('getApiKey', () => {
     };
   }
 
-  it('prefers the option and the environment over Infisical', async () => {
-    const run = async () => {
-      throw new Error('infisical must not run');
-    };
-    expect(await getApiKey(host(run), { ...resolveHookConfig({}), apiKey: 'opt' })).toBe('opt');
-    const $ = { ...host(run), env: { get: async (name: string) => (name === 'TYPESAFE_API_KEY' ? 'env' : undefined) } };
-    expect(await getApiKey($, resolveHookConfig({}))).toBe('env');
+  const mustNotRun = async () => {
+    throw new Error('apiKeyCommand must not run');
+  };
+
+  it('prefers the option and the environment over apiKeyCommand', async () => {
+    const config = resolveHookConfig({ apiKey: 'opt', apiKeyCommand: command });
+    expect(await getApiKey(host(mustNotRun), config)).toBe('opt');
+    const $ = { ...host(mustNotRun), env: { get: async (name: string) => (name === 'TYPESAFE_API_KEY' ? 'env' : undefined) } };
+    expect(await getApiKey($, resolveHookConfig({ apiKeyCommand: command }))).toBe('env');
   });
 
-  it('falls back to the Infisical CLI run from HOME', async () => {
+  it('runs apiKeyCommand through sh from HOME', async () => {
     const calls: { argv: readonly string[]; cwd?: string }[] = [];
     const key = await getApiKey(
       host(async (argv, init) => {
         calls.push({ argv, cwd: init?.cwd });
         return { exitCode: 0, stdout: 'secret\n' };
       }),
-      resolveHookConfig({}),
+      resolveHookConfig({ apiKeyCommand: command }),
     );
     expect(key).toBe('secret');
-    expect(calls).toEqual([{ argv: INFISICAL_ARGV, cwd: '/home/me' }]);
+    expect(calls).toEqual([{ argv: ['/bin/sh', '-c', command], cwd: '/home/me' }]);
   });
 
-  it('is undefined when Infisical fails or is missing', async () => {
-    const config = resolveHookConfig({});
+  it('is undefined without apiKeyCommand, or when the command fails', async () => {
+    expect(await getApiKey(host(mustNotRun), resolveHookConfig({}))).toBeUndefined();
+    const config = resolveHookConfig({ apiKeyCommand: command });
     expect(await getApiKey(host(async () => ({ exitCode: 1, stdout: '' })), config)).toBeUndefined();
     expect(
       await getApiKey(

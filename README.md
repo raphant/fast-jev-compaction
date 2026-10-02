@@ -151,9 +151,8 @@ claude plugin install fast-jev-compaction@fast-jev-compaction
 ```
 
 The install prompts for the plugin options (API key, thresholds, `truncateHeadChars`,
-…); leave the API key empty. The hook then gets the key from the Infisical CLI
-(`TYPESAFE_API_KEY` in the `/claude-hooks` folder of the `dev` environment), so
-the key is never in a file or in the environment; see
+…); leave the API key empty and set `apiKeyCommand` to a command that prints
+the key, so the key is never in a file or in the environment; see
 [`hooks/README.md`](hooks/README.md#configuration).
 Restart Claude Code or run `/reload-plugins`. From then on `/compact` (and
 auto-compaction) goes through Jev: the toast reads

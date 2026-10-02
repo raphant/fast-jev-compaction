@@ -59,14 +59,22 @@ The plugin declares these `userConfig` values in
 
 The hook looks for the TypeSafe key in this order: the sensitive `apiKey`
 plugin option, `TYPESAFE_API_KEY` in the environment, `TYPESAFE_API_KEY` in
-settings.json `env`, then the Infisical CLI. The last step runs
-`infisical secrets get TYPESAFE_API_KEY --env=dev --path=/claude-hooks` from
-`$HOME` (so `~/.infisical.json` selects the project) and keeps the key in the
-hook's memory only. Keep the secret in `/claude-hooks`: `infisical export`
-reads the root folder only, so a shell wrapper that exports the root never
-puts the key in the environment that Bash and MCP servers inherit.
+settings.json `env`, then the stdout of the `apiKeyCommand` option. The
+command runs through `/bin/sh -c` from `$HOME`, once per session, and the key
+stays in the hook's memory only, out of the environment that Bash and MCP
+servers inherit. For Infisical:
 
-Every option except `apiKey`, `compactAtPercent`, `minReductionRatio` and
+```sh
+echo '{"apiKeyCommand": "infisical secrets get TYPESAFE_API_KEY --env=dev --path=/claude-hooks --plain --silent"}' \
+  | claude plugin configure fast-jev-compaction@fast-jev-compaction --values-stdin
+```
+
+`$HOME` as the working directory lets `~/.infisical.json` select the project.
+Keep the secret in a folder such as `/claude-hooks`: `infisical export` reads
+the root folder only, so a shell wrapper that exports the root never puts the
+key in the environment.
+
+Every option except `apiKey`, `apiKeyCommand`, `compactAtPercent`, `minReductionRatio` and
 `model` is passed straight to the library; see the root README for what they
 do. The `session.compact` hook runs the Jev requests concurrently. If Jev fails,
 the response is malformed, the key is unavailable, the history cannot be

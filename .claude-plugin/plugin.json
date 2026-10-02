@@ -1,14 +1,19 @@
 {
   "name": "fast-jev-compaction",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Verbatim Jev-guided compaction for Claude Code sessions.",
   "license": "MIT",
   "userConfig": {
     "apiKey": {
       "type": "string",
       "title": "TypeSafe API key",
-      "description": "TypeSafe API key. Leave unset to use TYPESAFE_API_KEY.",
+      "description": "TypeSafe API key. Leave unset to use TYPESAFE_API_KEY or apiKeyCommand.",
       "sensitive": true
+    },
+    "apiKeyCommand": {
+      "type": "string",
+      "title": "API key command",
+      "description": "Shell command that prints the TypeSafe key, run from $HOME when no other source has it, e.g. infisical secrets get TYPESAFE_API_KEY --env=dev --path=/claude-hooks --plain --silent."
     },
     "keepThreshold": {
       "type": "number",
