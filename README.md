@@ -139,19 +139,22 @@ Function hooks are an early-access Claude Code feature (2.1.274+), so the
 opt-in flag must be set wherever Claude Code runs, e.g. in `~/.claude/settings.json`:
 
 ```json
-{ "env": { "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS": "1", "TYPESAFE_API_KEY": "<your key>" } }
+{ "env": { "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS": "1" } }
 ```
 
 Then add this repository as a plugin marketplace and install the plugin,
 either from the shell or as slash commands inside a session:
 
 ```sh
-claude plugin marketplace add tamaratran/fast-jev-compaction
+claude plugin marketplace add raphant/fast-jev-compaction
 claude plugin install fast-jev-compaction@fast-jev-compaction
 ```
 
 The install prompts for the plugin options (API key, thresholds, `truncateHeadChars`,
-…); leave them at their defaults to use `TYPESAFE_API_KEY` from the environment.
+…); leave the API key empty. The hook then gets the key from the Infisical CLI
+(`TYPESAFE_API_KEY` in the `/claude-hooks` folder of the `dev` environment), so
+the key is never in a file or in the environment; see
+[`hooks/README.md`](hooks/README.md#configuration).
 Restart Claude Code or run `/reload-plugins`. From then on `/compact` (and
 auto-compaction) goes through Jev: the toast reads
 `fast-jev-compaction: kept N/M messages, no summary (…)` when the pruned history
@@ -170,7 +173,7 @@ npm run typecheck        # library + hook
 npm test
 npm run build
 npm run validate:plugin  # claude plugin validate
-TYPESAFE_API_KEY="$(cat ~/.typesafe_key)" npm run demo
+infisical run --env=dev --path=/claude-hooks -- npm run demo
 ```
 
 The unit tests use a fake Jev and never contact TypeSafe. The demo is the live

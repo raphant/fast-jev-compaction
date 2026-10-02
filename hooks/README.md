@@ -57,9 +57,14 @@ The plugin declares these `userConfig` values in
 | `truncateHeadChars` | `300` |
 | `model` | `jev-latest` |
 
-The TypeSafe key can be supplied as the sensitive `apiKey` plugin option or
-through `TYPESAFE_API_KEY`. The environment variable is the recommended
-development setup.
+The hook looks for the TypeSafe key in this order: the sensitive `apiKey`
+plugin option, `TYPESAFE_API_KEY` in the environment, `TYPESAFE_API_KEY` in
+settings.json `env`, then the Infisical CLI. The last step runs
+`infisical secrets get TYPESAFE_API_KEY --env=dev --path=/claude-hooks` from
+`$HOME` (so `~/.infisical.json` selects the project) and keeps the key in the
+hook's memory only. Keep the secret in `/claude-hooks`: `infisical export`
+reads the root folder only, so a shell wrapper that exports the root never
+puts the key in the environment that Bash and MCP servers inherit.
 
 Every option except `apiKey`, `compactAtPercent`, `minReductionRatio` and
 `model` is passed straight to the library; see the root README for what they

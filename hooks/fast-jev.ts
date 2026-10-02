@@ -224,10 +224,36 @@ export function decisionLogLines(
   );
 }
 
-async function getApiKey(
+/**
+ * Asks the Infisical CLI for the key, run from $HOME so ~/.infisical.json picks
+ * the project. The key sits in `/claude-hooks`, a folder `infisical export`
+ * (root only) never reads, so it stays out of every process environment.
+ */
+export const INFISICAL_ARGV = [
+  'infisical',
+  'secrets',
+  'get',
+  'TYPESAFE_API_KEY',
+  '--env=dev',
+  '--path=/claude-hooks',
+  '--plain',
+  '--silent',
+] as const;
+
+/**
+ * Finds the TypeSafe key: the `apiKey` option, then `TYPESAFE_API_KEY` in the
+ * environment, then in settings.json `env`, then Infisical. Undefined when none has it.
+ */
+export async function getApiKey(
   $: {
     env: { get: (name: string) => Promise<string | undefined> };
     settings: { read: () => Promise<Readonly<Record<string, unknown>>> };
+    process: {
+      run: (
+        argv: readonly string[],
+        init?: { cwd?: string },
+      ) => Promise<{ exitCode: number | null; stdout: string }>;
+    };
   },
   config: HookConfig,
 ): Promise<string | undefined> {
@@ -239,6 +265,14 @@ async function getApiKey(
   if (env && typeof env === 'object') {
     const value = (env as Record<string, unknown>)['TYPESAFE_API_KEY'];
     if (typeof value === 'string' && value) return value;
+  }
+  try {
+    const home = await $.env.get('HOME');
+    const { exitCode, stdout } = await $.process.run(INFISICAL_ARGV, home ? { cwd: home } : {});
+    const value = stdout.trim();
+    if (exitCode === 0 && value) return value;
+  } catch {
+    // infisical missing or timed out: report the key as not configured
   }
   return undefined;
 }
@@ -259,10 +293,13 @@ function notify(
 export const register: Register = (on: On, options: PluginOptions) => {
   const configured = resolveHookConfig(options);
   let compacting = false;
+  // Found once per session; a miss is retried on the next compaction.
+  let apiKey: string | undefined;
 
   on('session.compact', async ($, event, next) => {
     try {
-      const config = { ...configured, apiKey: await getApiKey($, configured) };
+      apiKey ??= await getApiKey($, configured);
+      const config = { ...configured, apiKey };
       const { result, messages } = await compactSession(event.messages, config, async (url, init) => {
         const response = await $.http.fetch(url, init);
         return { status: response.status, ok: response.ok, text: response.text };
