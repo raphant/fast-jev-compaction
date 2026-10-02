@@ -59,6 +59,7 @@ The plugin declares these `userConfig` values in
 | --- | ---: |
 | `apiKey` | unset |
 | `apiKeyCommand` | unset |
+| `fetchCommand` | unset |
 | `keepThreshold` | `0.5` |
 | `preserveRecentMessages` | `6` |
 | `compactAtPercent` | `60` |
@@ -85,8 +86,44 @@ Keep the secret in a folder such as `/claude-hooks`: `infisical export` reads
 the root folder only, so a shell wrapper that exports the root never puts the
 key in the environment.
 
-Every option except `apiKey`, `apiKeyCommand`, `compactAtPercent`, `minReductionRatio` and
-`model` is passed straight to the library; see the root README for what they
+### Networks with a TLS-inspection proxy
+
+A TLS-inspection proxy decrypts TLS and signs a new certificate for each host.
+If the proxy's CA certificate names `anyExtendedKeyUsage` instead of
+`serverAuth`, Claude Code's `$.http.fetch` refuses the server with
+`INVALID_PURPOSE: unsupported certificate purpose`, and every compaction falls
+back to the built-in summary. For that case, set `fetchCommand` to the helper
+that comes with the plugin:
+
+```sh
+echo '{"fetchCommand": "node ~/.claude/plugins/marketplaces/fast-jev-compaction/bin/jev-fetch.mjs"}' \
+  | claude plugin configure fast-jev-compaction@fast-jev-compaction --values-stdin
+```
+
+The hook runs the command through `/bin/sh -c` from `$HOME`, once per Jev
+request. It writes the request to the command's stdin as JSON
+(`{ url, method, headers, body }`), so the key does not show in the process
+list, and reads `{ status, text }` as JSON from its stdout. Any command that
+does the same works, if it never prints the key: the hook shows the start of
+a failed command's stderr in the toast and the log. The helper needs Node 22.15 or later; write the full path
+to `node` if Claude Code's `PATH` does not have it.
+
+The helper sends requests to `https://api.typesafe.ai` only, and the server
+gets no byte of a request until one of these is true:
+
+- Node's own TLS checks pass, against Node's CAs and the system's CAs.
+- Node's only complaint is `INVALID_PURPOSE`, and the helper's own checks pass:
+  the name, a signature path to a self-signed trusted CA, the dates, the CA
+  flags, and `serverAuth` (or no purpose limit) on every certificate except the
+  leaf's issuer, which may name `anyExtendedKeyUsage` instead.
+
+The helper does not check revocation; Node does not check it either.
+[`docs/juice/tls-inspection-proxy.md`](../docs/juice/tls-inspection-proxy.md)
+has the measured chain, and `tests/jev-fetch.test.ts` has the cases the helper
+accepts and refuses.
+
+Every option except `apiKey`, `apiKeyCommand`, `fetchCommand`, `compactAtPercent`,
+`minReductionRatio` and `model` is passed straight to the library; see the root README for what they
 do. The `session.compact` hook runs the Jev requests concurrently. If Jev fails,
 the response is malformed, the key is unavailable, the history cannot be
 fitted into the state budget, or the estimated reduction is below

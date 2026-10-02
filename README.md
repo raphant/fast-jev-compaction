@@ -154,6 +154,9 @@ The install prompts for the plugin options (API key, thresholds, `truncateHeadCh
 …); leave the API key empty and set `apiKeyCommand` to a command that prints
 the key, so the key is never in a file or in the environment; see
 [`hooks/README.md`](hooks/README.md#configuration).
+If a TLS-inspection proxy makes every Jev request fail with `INVALID_PURPOSE`,
+set `fetchCommand`; see
+[`hooks/README.md`](hooks/README.md#networks-with-a-tls-inspection-proxy).
 Restart Claude Code or run `/reload-plugins`. From then on `/compact` (and
 auto-compaction) goes through Jev: the toast reads
 `fast-jev-compaction: kept N/M messages (auto), no summary (…)` when the pruned
