@@ -100,6 +100,11 @@ echo '{"fetchCommand": "node ~/.claude/plugins/marketplaces/fast-jev-compaction/
   | claude plugin configure fast-jev-compaction@fast-jev-compaction --values-stdin
 ```
 
+If the host cannot set plugin options, for example an Agent SDK run with a
+new config dir for each run, set `FAST_JEV_FETCH_COMMAND` in the environment
+instead; the option wins when both are set. With `TYPESAFE_API_KEY` in the
+environment too, such a host needs no plugin options at all.
+
 The hook runs the command through `/bin/sh -c` from `$HOME`, once per Jev
 request. It writes the request to the command's stdin as JSON
 (`{ url, method, headers, body }`), so the key does not show in the process

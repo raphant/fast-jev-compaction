@@ -240,6 +240,32 @@ describe('session.compact hook', () => {
     expect(bodies).not.toHaveLength(0);
     expect(toasts).toEqual([expect.stringMatching(/^kept 3\/7 messages \(auto\)/)]);
   });
+
+  it('takes fetchCommand from FAST_JEV_FETCH_COMMAND when the option is unset', async () => {
+    const bodies: string[] = [];
+    const answer = jevFetch(() => 0.1, bodies);
+    const notFetch = (async () => {
+      throw new Error('$.http.fetch must not run');
+    }) as ReturnType<typeof jevFetch>;
+    const commands: string[] = [];
+    const toasts: string[] = [];
+    const $ = {
+      ...host(notFetch, toasts),
+      env: { get: async (name: string) => (name === 'FAST_JEV_FETCH_COMMAND' ? 'node from-env.mjs' : undefined) },
+      process: {
+        run: async (argv: readonly string[], init?: { stdin?: string }) => {
+          commands.push(argv[argv.length - 1]!);
+          const { url, ...rest } = JSON.parse(init?.stdin ?? '{}') as { url: string; body?: string };
+          const response = await answer(url, rest);
+          return { exitCode: 0, stdout: JSON.stringify({ status: response.status, text: response.text }), stderr: '' };
+        },
+      },
+    };
+    await compactHook({ apiKey: 'k', preserveRecentMessages: 1 })($, { trigger: 'auto', messages: transcript() }, next);
+    expect(bodies).not.toHaveLength(0);
+    expect(new Set(commands)).toEqual(new Set(['node from-env.mjs']));
+    expect(toasts).toEqual([expect.stringMatching(/^kept 3\/7 messages \(auto\)/)]);
+  });
 });
 
 describe('commandFetch', () => {

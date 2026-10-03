@@ -343,6 +343,9 @@ export const register: Register = (on: On, options: PluginOptions) => {
         : { skip: 'fast-jev-compaction skips precompute' };
     }
     try {
+      // For hosts that cannot set plugin options, such as an Agent SDK run with
+      // a fresh config dir: the environment can still name the fetch command.
+      configured.fetchCommand ??= await $.env.get('FAST_JEV_FETCH_COMMAND');
       apiKey ??= await getApiKey($, configured);
       const config = { ...configured, apiKey };
       const fetchFn: HookFetch = configured.fetchCommand
