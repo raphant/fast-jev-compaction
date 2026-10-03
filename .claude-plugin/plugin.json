@@ -1,6 +1,6 @@
 {
   "name": "fast-jev-compaction",
-  "version": "0.3.1",
+  "version": "0.4.1",
   "description": "Verbatim Jev-guided compaction for Claude Code sessions.",
   "license": "MIT",
   "userConfig": {
@@ -14,6 +14,11 @@
       "type": "string",
       "title": "API key command",
       "description": "Shell command that prints the TypeSafe key, run from $HOME when no other source has it, e.g. infisical secrets get TYPESAFE_API_KEY --env=dev --path=/claude-hooks --plain --silent."
+    },
+    "fetchCommand": {
+      "type": "string",
+      "title": "Fetch command",
+      "description": "Shell command that sends each Jev request instead of Claude Code's fetch, run from $HOME: it reads {url, method, headers, body} as JSON on stdin and prints {status, text}. For a TLS-inspection proxy that fails with INVALID_PURPOSE, e.g. node ~/.claude/plugins/marketplaces/fast-jev-compaction/bin/jev-fetch.mjs. Leave unset to use FAST_JEV_FETCH_COMMAND."
     },
     "keepThreshold": {
       "type": "number",

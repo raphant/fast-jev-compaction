@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  commandFetch,
   compactSession,
   decisionLog,
   decisionLogLines,
   getApiKey,
+  register,
   resolveHookConfig,
   summarize,
   toSessionMessages,
@@ -56,9 +58,10 @@ describe('hook config', () => {
   it('reads userConfig values and falls back to defaults', () => {
     expect(resolveHookConfig({})).toEqual({ compactAtPercent: 60, minReductionRatio: 0.25, model: 'jev-latest' });
     expect(
-      resolveHookConfig({ apiKey: 'k', keepThreshold: 0.3, maxStateTokens: 1000, model: 'jev-x', goal: 'g', compactAtPercent: 'no' }),
+      resolveHookConfig({ apiKey: 'k', keepThreshold: 0.3, maxStateTokens: 1000, model: 'jev-x', goal: 'g', compactAtPercent: 'no', fetchCommand: 'f' }),
     ).toEqual({
       apiKey: 'k',
+      fetchCommand: 'f',
       keepThreshold: 0.3,
       maxStateTokens: 1000,
       model: 'jev-x',
@@ -146,6 +149,157 @@ describe('compactSession', () => {
     await expect(
       compactSession(transcript(), { ...config, apiKey: 'k' }, async () => ({ status: 500, ok: false, text: 'x' })),
     ).rejects.toThrow(/500/);
+  });
+});
+
+describe('session.compact hook', () => {
+  type Compact = (
+    $: unknown,
+    event: { trigger: string; messages: SessionMessage[] },
+    next: () => Promise<unknown>,
+  ) => Promise<unknown>;
+
+  function compactHook(options: Record<string, unknown>): Compact {
+    let hook: Compact | undefined;
+    const on = (name: string, ...rest: unknown[]) => {
+      if (name === 'session.compact') hook = rest[rest.length - 1] as Compact;
+    };
+    register(on as never, options as never);
+    return hook!;
+  }
+
+  function host(fetch: ReturnType<typeof jevFetch>, toasts: string[]) {
+    return {
+      env: { get: async () => undefined },
+      settings: { read: async () => ({}) },
+      http: { fetch },
+      ui: { log: () => {}, toast: (text: string) => toasts.push(text) },
+    };
+  }
+
+  const next = async () => ({ skip: 'built-in' });
+
+  it('skips a precompute without asking Jev', async () => {
+    const bodies: string[] = [];
+    const out = await compactHook({ apiKey: 'k', preserveRecentMessages: 1 })(
+      host(jevFetch(() => 0.1, bodies), []),
+      { trigger: 'precompute', messages: transcript() },
+      next,
+    );
+    expect(out).toEqual({ skip: expect.stringMatching(/precompute/) });
+    expect(bodies).toHaveLength(0);
+  });
+
+  it('hands a precompute to the built-in summary when no drop reaches the minimum', async () => {
+    const bodies: string[] = [];
+    const out = await compactHook({ apiKey: 'k' })(
+      host(jevFetch(() => 0.1, bodies), []),
+      { trigger: 'precompute', messages: transcript() },
+      next,
+    );
+    expect(out).toEqual({ skip: 'built-in' });
+    expect(bodies).toHaveLength(0);
+  });
+
+  it('names the trigger in the toast', async () => {
+    const toasts: string[] = [];
+    await compactHook({ apiKey: 'k', preserveRecentMessages: 1 })(
+      host(jevFetch(() => 0.1), toasts),
+      { trigger: 'auto', messages: transcript() },
+      next,
+    );
+    await compactHook({})(host(jevFetch(() => 0.1), toasts), { trigger: 'manual', messages: transcript() }, next);
+    expect(toasts).toEqual([
+      expect.stringMatching(/^kept 3\/7 messages \(auto\), no summary \(/),
+      'fallback to built-in summary (manual; TYPESAFE_API_KEY is not configured)',
+    ]);
+  });
+
+  it('sends Jev requests through fetchCommand when it is set', async () => {
+    const bodies: string[] = [];
+    const answer = jevFetch(() => 0.1, bodies);
+    const notFetch = (async () => {
+      throw new Error('$.http.fetch must not run');
+    }) as ReturnType<typeof jevFetch>;
+    const toasts: string[] = [];
+    const $ = {
+      ...host(notFetch, toasts),
+      process: {
+        run: async (_argv: readonly string[], init?: { stdin?: string }) => {
+          const { url, ...rest } = JSON.parse(init?.stdin ?? '{}') as { url: string; body?: string };
+          const response = await answer(url, rest);
+          return { exitCode: 0, stdout: JSON.stringify({ status: response.status, text: response.text }), stderr: '' };
+        },
+      },
+    };
+    await compactHook({ apiKey: 'k', preserveRecentMessages: 1, fetchCommand: 'node jev-fetch.mjs' })(
+      $,
+      { trigger: 'auto', messages: transcript() },
+      next,
+    );
+    expect(bodies).not.toHaveLength(0);
+    expect(toasts).toEqual([expect.stringMatching(/^kept 3\/7 messages \(auto\)/)]);
+  });
+
+  it('takes fetchCommand from FAST_JEV_FETCH_COMMAND when the option is unset', async () => {
+    const bodies: string[] = [];
+    const answer = jevFetch(() => 0.1, bodies);
+    const notFetch = (async () => {
+      throw new Error('$.http.fetch must not run');
+    }) as ReturnType<typeof jevFetch>;
+    const commands: string[] = [];
+    const toasts: string[] = [];
+    const $ = {
+      ...host(notFetch, toasts),
+      env: { get: async (name: string) => (name === 'FAST_JEV_FETCH_COMMAND' ? 'node from-env.mjs' : undefined) },
+      process: {
+        run: async (argv: readonly string[], init?: { stdin?: string }) => {
+          commands.push(argv[argv.length - 1]!);
+          const { url, ...rest } = JSON.parse(init?.stdin ?? '{}') as { url: string; body?: string };
+          const response = await answer(url, rest);
+          return { exitCode: 0, stdout: JSON.stringify({ status: response.status, text: response.text }), stderr: '' };
+        },
+      },
+    };
+    await compactHook({ apiKey: 'k', preserveRecentMessages: 1 })($, { trigger: 'auto', messages: transcript() }, next);
+    expect(bodies).not.toHaveLength(0);
+    expect(new Set(commands)).toEqual(new Set(['node from-env.mjs']));
+    expect(toasts).toEqual([expect.stringMatching(/^kept 3\/7 messages \(auto\)/)]);
+  });
+});
+
+describe('commandFetch', () => {
+  const command = 'node ~/jev-fetch.mjs';
+  const url = 'https://api.typesafe.ai/v1/systemone';
+
+  it('runs the command through sh with the request as JSON on stdin', async () => {
+    const calls: unknown[] = [];
+    const fetch = commandFetch(
+      async (argv, init) => {
+        calls.push({ argv, init });
+        return { exitCode: 0, stdout: '{"status":200,"text":"{}"}', stderr: '' };
+      },
+      command,
+      '/home/me',
+    );
+    const init = { method: 'POST', headers: { authorization: 'Bearer k' }, body: '{}' };
+    expect(await fetch(url, init)).toEqual({ status: 200, ok: true, text: '{}' });
+    expect(calls).toEqual([
+      {
+        argv: ['/bin/sh', '-c', command],
+        init: { cwd: '/home/me', stdin: JSON.stringify({ url, ...init }), timeoutMs: 60_000 },
+      },
+    ]);
+  });
+
+  it('fails on a nonzero exit, with stderr, and on output that is not { status, text }', async () => {
+    const refused = 'jev-fetch: refused api.typesafe.ai: the certificate name does not match\n';
+    await expect(
+      commandFetch(async () => ({ exitCode: 1, stdout: '', stderr: refused }), command, undefined)(url),
+    ).rejects.toThrow(`fetchCommand exited 1: ${refused.trim()}`);
+    await expect(
+      commandFetch(async () => ({ exitCode: 0, stdout: 'oops', stderr: '' }), command, undefined)(url),
+    ).rejects.toThrow('fetchCommand printed no { status, text } JSON');
   });
 });
 

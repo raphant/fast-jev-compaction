@@ -8,7 +8,7 @@ import type {
   TurnCompleteInput,
 } from 'claude-code';
 
-import { compact, reductionRatio, resolveOptions } from '../src/compact.js';
+import { compact, maxReduction, reductionRatio, resolveOptions } from '../src/compact.js';
 import { buildJevRequest, DEFAULT_MODEL, parseJevResponse } from '../src/request.js';
 import type {
   CompactOptions,
@@ -43,6 +43,7 @@ export type HookFetch = (url: string, init?: HookFetchInit) => Promise<HookFetch
 export type HookConfig = CompactOptions & {
   apiKey?: string;
   apiKeyCommand?: string;
+  fetchCommand?: string;
   compactAtPercent: number;
   minReductionRatio: number;
   model: string;
@@ -85,12 +86,14 @@ export function resolveHookConfig(options: PluginOptions): HookConfig {
   if (apiKey) config.apiKey = apiKey;
   const apiKeyCommand = optionString(options, 'apiKeyCommand');
   if (apiKeyCommand) config.apiKeyCommand = apiKeyCommand;
+  const fetchCommand = optionString(options, 'fetchCommand');
+  if (fetchCommand) config.fetchCommand = fetchCommand;
   const goal = optionString(options, 'goal');
   if (goal) config.goal = goal;
   return config;
 }
 
-/** A `JevAsker` over the engine's `$.http.fetch`. */
+/** A `JevAsker` over a `HookFetch`: the engine's `$.http.fetch`, or `commandFetch`. */
 export function jevAsker(fetchFn: HookFetch, apiKey: string, model: string): JevAsker {
   return {
     async ask(state, questions) {
@@ -269,6 +272,47 @@ export async function getApiKey(
   return undefined;
 }
 
+const FETCH_COMMAND_TIMEOUT_MS = 60_000;
+
+/**
+ * A `HookFetch` that runs the `fetchCommand` option through `/bin/sh -c` from
+ * `cwd`, for networks where `$.http.fetch` cannot reach Jev. The command reads
+ * `{ url, method, headers, body }` as JSON on stdin, so the key stays out of
+ * the process list, and prints `{ status, text }` as JSON. A nonzero exit is a
+ * failure, reported with the start of stderr, so the command must never print
+ * the key. `bin/jev-fetch.mjs` is one such command.
+ */
+export function commandFetch(
+  run: (
+    argv: readonly string[],
+    init?: { cwd?: string; stdin?: string; timeoutMs?: number },
+  ) => Promise<{ exitCode: number; stdout: string; stderr: string }>,
+  command: string,
+  cwd: string | undefined,
+): HookFetch {
+  return async (url, init = {}) => {
+    const { exitCode, stdout, stderr } = await run(['/bin/sh', '-c', command], {
+      ...(cwd ? { cwd } : {}),
+      stdin: JSON.stringify({ url, ...init }),
+      timeoutMs: FETCH_COMMAND_TIMEOUT_MS,
+    });
+    if (exitCode !== 0) {
+      throw new Error(`fetchCommand exited ${exitCode}: ${stderr.trim().slice(0, 300)}`);
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(stdout);
+    } catch {
+      parsed = undefined;
+    }
+    const { status, text } = (parsed ?? {}) as { status?: unknown; text?: unknown };
+    if (typeof status !== 'number' || typeof text !== 'string') {
+      throw new Error('fetchCommand printed no { status, text } JSON');
+    }
+    return { status, ok: status >= 200 && status < 300, text };
+  };
+}
+
 function notify(
   $: {
     ui: {
@@ -289,30 +333,45 @@ export const register: Register = (on: On, options: PluginOptions) => {
   let apiKey: string | undefined;
 
   on('session.compact', async ($, event, next) => {
+    // The engine discards our precompute when the conversation grows before the
+    // threshold, but it keeps a built-in summary built ahead of time. So pass a
+    // precompute on only when no Jev answer could reach the minimum, that is,
+    // when the compaction to come will fall back to the built-in summary.
+    if (event.trigger === 'precompute') {
+      return maxReduction(event.messages, configured) < configured.minReductionRatio
+        ? next(event)
+        : { skip: 'fast-jev-compaction skips precompute' };
+    }
     try {
+      // For hosts that cannot set plugin options, such as an Agent SDK run with
+      // a fresh config dir: the environment can still name the fetch command.
+      configured.fetchCommand ??= await $.env.get('FAST_JEV_FETCH_COMMAND');
       apiKey ??= await getApiKey($, configured);
       const config = { ...configured, apiKey };
-      const { result, messages } = await compactSession(event.messages, config, async (url, init) => {
-        const response = await $.http.fetch(url, init);
-        return { status: response.status, ok: response.ok, text: response.text };
-      });
+      const fetchFn: HookFetch = configured.fetchCommand
+        ? commandFetch((argv, init) => $.process.run(argv, init), configured.fetchCommand, await $.env.get('HOME'))
+        : async (url, init) => {
+            const response = await $.http.fetch(url, init);
+            return { status: response.status, ok: response.ok, text: response.text };
+          };
+      const { result, messages } = await compactSession(event.messages, config, fetchFn);
       for (const line of decisionLogLines(result)) $.ui.log(line);
       if (reductionRatio(result) < config.minReductionRatio) {
         notify(
           $,
-          `fallback to built-in summary (below ${percent(config.minReductionRatio)} minimum: ${summarize(result)})`,
+          `fallback to built-in summary (${event.trigger}; below ${percent(config.minReductionRatio)} minimum: ${summarize(result)})`,
         );
         return next(event);
       }
       notify(
         $,
-        `kept ${messages.length}/${event.messages.length} messages, no summary (${summarize(result)})`,
+        `kept ${messages.length}/${event.messages.length} messages (${event.trigger}), no summary (${summarize(result)})`,
       );
       return { messages };
     } catch (error) {
       notify(
         $,
-        `fallback to built-in summary (${error instanceof Error ? error.message : String(error)})`,
+        `fallback to built-in summary (${event.trigger}; ${error instanceof Error ? error.message : String(error)})`,
       );
       return next(event);
     }

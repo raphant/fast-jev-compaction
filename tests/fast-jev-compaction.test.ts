@@ -10,6 +10,7 @@ import {
   estimateTokens,
   fitState,
   JevClient,
+  maxReduction,
   parseJevResponse,
   reductionRatio,
   resolveOptions,
@@ -377,6 +378,13 @@ describe('compact', () => {
     const output = await compact(transcript(), fakeJev(() => 0.95), { preserveRecentMessages: 1 });
     expect(output.decisions.every((d) => d.action === 'keep')).toBe(true);
     expect(reductionRatio(output)).toBe(0);
+  });
+
+  it('bounds the reduction by what dropping every unpinned call removes', async () => {
+    const messages = transcript();
+    const dropAll = await compact(messages, fakeJev(() => 0), { preserveRecentMessages: 1 });
+    expect(maxReduction(messages, { preserveRecentMessages: 1 })).toBe(reductionRatio(dropAll));
+    expect(maxReduction(messages, { preserveRecentMessages: messages.length })).toBe(0);
   });
 
   it('rejects malformed answers', async () => {
